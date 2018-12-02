@@ -9,10 +9,13 @@ module JsonbAccessor
           mapping[name.to_s] = (options.try(:delete, :store_key) || name).to_s
         end
 
-        # Defines virtual attributes for each jsonb field.
-        field_types.each do |name, type|
-          attribute name, *type
+        names_and_method_names = field_types.each_with_object({}) do |(name, type), mapping|
+          _type, options = Array(type)
+          method_name =  options.try(:delete, :method_name) || name
+          attribute method_name, *type
+          mapping[name.to_s] = method_name.to_s
         end
+        # method_names_and_names = names_and_method_names.invert
 
         store_key_mapping_method_name = "jsonb_store_key_mapping_for_#{jsonb_attribute}"
         # Defines methods on the model class
@@ -59,9 +62,10 @@ module JsonbAccessor
         setters = Module.new do
           # Overrides the setter created by `attribute` above to make sure the jsonb attribute is kept in sync.
           names_and_store_keys.each do |name, store_key|
-            define_method("#{name}=") do |value|
+            method_name = names_and_method_names[name]
+            define_method("#{method_name}=") do |value|
               super(value)
-              new_values = (public_send(jsonb_attribute) || {}).merge(store_key => public_send(name))
+              new_values = (public_send(jsonb_attribute) || {}).merge(store_key => public_send(method_name))
               write_attribute(jsonb_attribute, new_values)
             end
           end
@@ -87,8 +91,8 @@ module JsonbAccessor
           if has_attribute?(jsonb_attribute)
             jsonb_values = public_send(jsonb_attribute) || {}
             jsonb_values.each do |store_key, value|
-              name = names_and_store_keys.key(store_key)
-              write_attribute(name, value) if name
+              method_name = names_and_method_names[names_and_store_keys.key(store_key)]
+              write_attribute(method_name, value) if method_name
             end
             clear_changes_information if persisted?
           end
